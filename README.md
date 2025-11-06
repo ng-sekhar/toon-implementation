@@ -12,8 +12,4 @@ This repository provides:
 - `tests/test_llm_reasoning_accuracy.py` — Compares JSON vs TOON reasoning results.
 - `tests/test_toon_generation.py` — Measures compression & decoding accuracy.
 
-## ⚙️ Setup
-```bash
-python -m venv venv
-source venv/bin/activate     # (or venv\Scripts\activate on Windows)
-pip install -r requirements.txt
+
