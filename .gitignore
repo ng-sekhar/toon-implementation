@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+
+# Virtual Environment
+venv/
+.env/
+.env
+
+# IDE & System
+.vscode/
+.idea/
+.DS_Store
+
+# Results / Logs
+results/
+logs/
+*.log
+
+# Jupyter notebooks checkpoints
+.ipynb_checkpoints/
+
+# OS files
+Thumbs.db
