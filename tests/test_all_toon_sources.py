@@ -2,16 +2,19 @@ import json
 import time
 import os
 from openai import OpenAI
-from src.toon_encoder import encode_toon
 from dotenv import load_dotenv
+from src.toon_encoder import encode_toon
+from src.llm_toon_generator import generate_in_toon
 import tiktoken
 
-# ---------- Load Environment Variables ----------
+# ---------- Load Environment ----------
 load_dotenv()
 api_key = os.getenv("OPENAI_API_KEY")
+if not api_key:
+    raise ValueError("❌ OPENAI_API_KEY not found in .env file")
 client = OpenAI(api_key=api_key)
 
-# ---------- Data ----------
+# ---------- Import Data ----------
 data = {
     "employees": [
         {"id": 1, "name": "Alice", "role": "Engineer", "exp": 5, "salary": 72000, "projects": ["Aurora", "Nebula"], "department": "R&D", "performance": 91},
@@ -108,89 +111,89 @@ questions = [
     "Summarize the overall company health using revenue, satisfaction, and innovation index."
 ]
 
-
-# ---------- Generate Inputs ----------
+# ---------- Encode in JSON ----------
 json_input = json.dumps(data, indent=2)
-toon_input = encode_toon(data)
 
-# ---------- Token Counting ----------
+# ---------- Encode in TOON (deterministic) ----------
+toon_input_encoder = encode_toon(data)
+
+# ---------- Encode in TOON (LLM-generated) ----------
+print("⏳ Generating TOON via LLM...")
+toon_input_llm = generate_in_toon("gpt-4o-mini", "Convert this JSON data into TOON format.", json_input)
+print("✅ LLM TOON Generated Successfully!\n")
+
+# ---------- Token Stats ----------
 enc = tiktoken.get_encoding("o200k_base")
-json_tokens = len(enc.encode(json_input))
-toon_tokens = len(enc.encode(toon_input))
-token_savings = (1 - toon_tokens / json_tokens) * 100
+def token_count(txt): return len(enc.encode(txt))
+print("🔹 Token Usage Comparison")
+print(f"JSON: {token_count(json_input)} tokens")
+print(f"TOON Encoder: {token_count(toon_input_encoder)} tokens")
+print(f"TOON LLM: {token_count(toon_input_llm)} tokens\n")
 
-print("🔹 Token Comparison")
-print(f"   JSON Tokens: {json_tokens}")
-print(f"   TOON Tokens: {toon_tokens}")
-print(f"   ➡️  {token_savings:.2f}% token savings\n")
-
-# ---------- Function to Query LLM with Latency ----------
-def ask_llm(model: str, format_type: str, data_str: str, question: str):
-    system_prompt = f"""
-You are an expert data analyst. The following data is provided in {format_type} format.
-Parse it carefully and answer the question accurately.
-"""
+# ---------- Query Function ----------
+def ask_llm(model, format_type, data_str, question):
+    system_prompt = f"You are an expert analyst. Parse the {format_type} data carefully and answer accurately."
     user_prompt = f"Data:\n{data_str}\n\nQuestion: {question}\nAnswer:"
-    
-    start_time = time.time()
-    response = client.chat.completions.create(
+    start = time.time()
+    res = client.chat.completions.create(
         model=model,
         messages=[
             {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
+            {"role": "user", "content": user_prompt}
         ],
-        temperature=0,
+        temperature=0
     )
-    latency = time.time() - start_time
-    answer = response.choices[0].message.content.strip()
-    
-    return answer, latency
+    latency = time.time() - start
+    return res.choices[0].message.content.strip(), latency
 
 # ---------- Run Tests ----------
 model = "gpt-4o-mini"
 results = []
 
 for q in questions:
-    print(f"🔍 Question: {q}")
+    print(f"\n🔍 Question: {q}")
 
-    json_start = time.time()
-    json_ans, json_latency = ask_llm(model, "JSON", json_input, q)
-    toon_ans, toon_latency = ask_llm(model, "TOON", toon_input, q)
+    json_ans, json_lat = ask_llm(model, "JSON", json_input, q)
+    toon_enc_ans, toon_enc_lat = ask_llm(model, "TOON (encoded)", toon_input_encoder, q)
+    toon_llm_ans, toon_llm_lat = ask_llm(model, "TOON (LLM-generated)", toon_input_llm, q)
 
-    print(f"   JSON → {json_ans}  ({json_latency:.2f}s)")
-    print(f"   TOON → {toon_ans}  ({toon_latency:.2f}s)\n")
-
-    match = json_ans.lower().strip() == toon_ans.lower().strip()
+    match_enc = json_ans.lower().strip() == toon_enc_ans.lower().strip()
+    match_llm = json_ans.lower().strip() == toon_llm_ans.lower().strip()
 
     results.append({
         "question": q,
         "json_answer": json_ans,
-        "toon_answer": toon_ans,
-        "json_latency_sec": round(json_latency, 3),
-        "toon_latency_sec": round(toon_latency, 3),
-        "latency_diff_sec": round(json_latency - toon_latency, 3),
-        "match": match
+        "toon_encoder_answer": toon_enc_ans,
+        "toon_llm_answer": toon_llm_ans,
+        "json_latency": round(json_lat, 3),
+        "toon_encoder_latency": round(toon_enc_lat, 3),
+        "toon_llm_latency": round(toon_llm_lat, 3),
+        "encoder_match": match_enc,
+        "llm_match": match_llm
     })
+
+    print(f"  JSON ({json_lat:.2f}s) → {json_ans[:80]}...")
+    print(f"  ENCODER ({toon_enc_lat:.2f}s) → {toon_enc_ans[:80]}... [Match: {match_enc}]")
+    print(f"  LLM TOON ({toon_llm_lat:.2f}s) → {toon_llm_ans[:80]}... [Match: {match_llm}]")
+
     time.sleep(1)
 
-# ---------- Save & Summarize ----------
+# ---------- Save Results ----------
 os.makedirs("results", exist_ok=True)
-with open("results/comparison_results_with_latency.json", "w") as f:
+with open("results/all_toon_comparison.json", "w") as f:
     json.dump(results, f, indent=2)
 
-print(f"\n🗂 Results saved to results/comparison_results_with_latency.json")
+print("\n🗂 Results saved to results/all_toon_comparison.json")
 
 # ---------- Summary ----------
-avg_json_latency = sum(r["json_latency_sec"] for r in results) / len(results)
-avg_toon_latency = sum(r["toon_latency_sec"] for r in results) / len(results)
-avg_diff = avg_json_latency - avg_toon_latency
-
-print("==============================================================")
-print(toon_input)
-print("==============================================================")
+avg_json = sum(r["json_latency"] for r in results) / len(results)
+avg_enc = sum(r["toon_encoder_latency"] for r in results) / len(results)
+avg_llm = sum(r["toon_llm_latency"] for r in results) / len(results)
 
 print("\n📊 Average Latency Summary")
-print("-" * 40)
-print(f"JSON Avg Latency : {avg_json_latency:.2f} s")
-print(f"TOON Avg Latency : {avg_toon_latency:.2f} s")
-print(f"➡️  Avg Speedup   : {avg_diff:.2f} s faster\n")
+print("-" * 50)
+print(f"JSON Avg Latency        : {avg_json:.2f}s")
+print(f"TOON Encoder Avg Latency: {avg_enc:.2f}s")
+print(f"TOON LLM Avg Latency    : {avg_llm:.2f}s")
+print(f"Encoder Match Rate      : {sum(r['encoder_match'] for r in results)/len(results)*100:.1f}%")
+print(f"LLM TOON Match Rate     : {sum(r['llm_match'] for r in results)/len(results)*100:.1f}%")
